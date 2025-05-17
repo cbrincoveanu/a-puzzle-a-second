@@ -1,4 +1,4 @@
-const CELL_SIZE = 42;
+const CELL_SIZE = 32;
 const BORDER_THICKNESS = 2;
 
 const MASTER_PIECES = [
@@ -33,8 +33,8 @@ const PUZZLE_CONFIGS = [
         timeUnit: 'M',
         gridSize: 8,
         permanentlyBlockedCells: [
-            { r: 0, c: 0 }, { r: 0, c: 7 },
-            { r: 1, c: 7 }, { r: 2, c: 7 }
+            { r: 0, c: 0 }, { r: 7, c: 0 },
+            { r: 7, c: 1 }, { r: 7, c: 2 }
         ],
         canvasOffset: { r: 4, c: 3 },
         maxTimeValue: 59,
@@ -45,10 +45,10 @@ const PUZZLE_CONFIGS = [
         timeUnit: 'S',
         gridSize: 8,
         permanentlyBlockedCells: [
-            { r: 7, c: 0 }, { r: 6, c: 0 },
-            { r: 5, c: 0 }, { r: 4, c: 0 }
+            { r: 0, c: 7 }, { r: 0, c: 6 },
+            { r: 0, c: 5 }, { r: 0, c: 4 }
         ],
-        canvasOffset: { r: 3, c: 10 }, 
+        canvasOffset: { r: 11, c: 2 }, 
         maxTimeValue: 59,
         pieceSelectionPreference: 'largeFirst',
     }
