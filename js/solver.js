@@ -163,7 +163,7 @@ function findIncrementalSolution(
             console.log(`Incremental (Minimal): Solution FOUND in ${(endTime - startTime).toFixed(2)} ms.`);
             return { success: true, placedPieces: [...currentAttemptPlacedList], type: 'incremental_minimal_success' };
         }
-        console.log("Incremental (Minimal): FAILED.");
+        //console.log("Incremental (Minimal): FAILED.");
     } else if (findNextEmptyGridCell(gridConsideringNewState, currentGridSize) !== null) {
          console.log("Incremental: No pieces initially displaced, but board not full. Escalating.");
     }
@@ -204,7 +204,7 @@ function findIncrementalSolution(
         currentSurvivorsForEscalation.splice(pieceToDisplaceNextIndexInSurvivors, 1);
         const originalIndexOfNewlyDisplaced = currentActivePieceSet.findIndex(ap => ap.id === pieceToDisplaceNext.piece.id);
         currentDisplacedForEscalation.add(originalIndexOfNewlyDisplaced);
-        console.log(`Escalation step ${escalationStep}: Displacing '${pieceToDisplaceNext.piece.masterPiece.name}'. Total displaced: ${currentDisplacedForEscalation.size}`);
+        //console.log(`Escalation step ${escalationStep}: Displacing '${pieceToDisplaceNext.piece.masterPiece.name}'. Total displaced: ${currentDisplacedForEscalation.size}`);
 
 
         let gridForThisEscalation = createInitialGridState(newTargetCell, currentGridSize, permanentlyBlockedCellsList);
@@ -225,7 +225,7 @@ function findIncrementalSolution(
             console.log(`Incremental (Escalation ${escalationStep}): Solution FOUND in ${(endTime - startTime).toFixed(2)} ms.`);
             return { success: true, placedPieces: [...placedListForThisEscalation], type: `incremental_escalation_${escalationStep}_success` };
         }
-        console.log(`Incremental (Escalation ${escalationStep}): FAILED.`);
+        //console.log(`Incremental (Escalation ${escalationStep}): FAILED.`);
         gridForEscalationAttempt = gridForThisEscalation;
     }
 
