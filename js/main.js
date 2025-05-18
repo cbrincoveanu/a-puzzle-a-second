@@ -1,3 +1,5 @@
+// js/main.js
+
 document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('puzzleCanvas');
     if (!canvas) { console.error("Canvas element not found!"); return; }
@@ -5,27 +7,60 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ctx) { console.error("Failed to get canvas context!"); return; }
 
     let puzzleStates = [];
-
+    let precomputedSolutions = {};
     const CANVAS_EFFECTIVE_BACKGROUND_COLOR = '#f0f0f0';
+    let precomputationFullyComplete = false;
 
-    function setupCanvasDimensions() {
-        let maxTotalRows = 0;
-        let maxTotalCols = 0;
+    const ORIGINAL_CONFIG_CELL_SIZE = CELL_SIZE;
+    const ORIGINAL_CONFIG_BORDER_THICKNESS = BORDER_THICKNESS;
 
+    let currentDynamicCellSize = ORIGINAL_CONFIG_CELL_SIZE;
+    let currentDynamicBorderThickness = ORIGINAL_CONFIG_BORDER_THICKNESS;
+
+    let totalPuzzleCellsWide = 0;
+    let totalPuzzleCellsHigh = 0;
+
+    function calculateTotalPuzzleDimensions() {
+        totalPuzzleCellsWide = 0;
+        totalPuzzleCellsHigh = 0;
         PUZZLE_CONFIGS.forEach(config => {
-            maxTotalRows = Math.max(maxTotalRows, config.canvasOffset.r + config.gridSize);
-            maxTotalCols = Math.max(maxTotalCols, config.canvasOffset.c + config.gridSize);
+            totalPuzzleCellsHigh = Math.max(totalPuzzleCellsHigh, config.canvasOffset.r + config.gridSize);
+            totalPuzzleCellsWide = Math.max(totalPuzzleCellsWide, config.canvasOffset.c + config.gridSize);
         });
+    }
 
-        canvas.width = maxTotalCols * CELL_SIZE;
-        canvas.height = maxTotalRows * CELL_SIZE;
-        console.log(`Canvas dimensions set to: ${canvas.width}x${canvas.height}`);
+    function resizeAndRedrawCanvas() {
+        const padding = 20;
+        const availableWidth = window.innerWidth - padding;
+        const availableHeight = window.innerHeight - (document.querySelector('h1')?.offsetHeight || 60) - padding - 40;
+
+        if (totalPuzzleCellsWide === 0 || totalPuzzleCellsHigh === 0) {
+            console.warn("Total puzzle dimensions not calculated yet. Skipping resize.");
+            return;
+        }
+
+        const cellSizeBasedOnWidth = availableWidth / totalPuzzleCellsWide;
+        const cellSizeBasedOnHeight = availableHeight / totalPuzzleCellsHigh;
+
+        currentDynamicCellSize = Math.floor(Math.min(cellSizeBasedOnWidth, cellSizeBasedOnHeight));
+
+        currentDynamicCellSize = Math.max(10, currentDynamicCellSize);
+        currentDynamicCellSize = Math.min(ORIGINAL_CONFIG_CELL_SIZE, currentDynamicCellSize);
+
+        currentDynamicBorderThickness = Math.max(1, Math.round(ORIGINAL_CONFIG_BORDER_THICKNESS * (currentDynamicCellSize / ORIGINAL_CONFIG_CELL_SIZE)));
+        currentDynamicBorderThickness = Math.min(ORIGINAL_CONFIG_BORDER_THICKNESS, Math.max(1, currentDynamicBorderThickness));
+
+        canvas.width = totalPuzzleCellsWide * currentDynamicCellSize;
+        canvas.height = totalPuzzleCellsHigh * currentDynamicCellSize;
+
+        console.log(`Resized. New Cell Size: ${currentDynamicCellSize}, Canvas: ${canvas.width}x${canvas.height}`);
+
+        redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
     }
 
     function initializePlayableCellAreaForPuzzle(puzzleState) {
         const config = puzzleState.config;
         const coords = generatePlayableCellCoordinates(config.gridSize, config.permanentlyBlockedCells);
-
         if (coords.length !== config.availablePlayableCells) {
             console.error(`CRITICAL (${config.id}): Playable cell count mismatch. Expected ${config.availablePlayableCells}, got ${coords.length}.`);
             return false;
@@ -39,139 +74,232 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    function updateTargetEmptyCellForPuzzle(puzzleState) {
+    function updateTargetEmptyCellForPuzzle(puzzleState, now) {
         const config = puzzleState.config;
         if (!puzzleState.playableCellCoords || puzzleState.playableCellCoords.length === 0) {
-            console.error(`(${config.id}) Playable cell coordinates not initialized for time mapping.`);
+            puzzleState.targetEmptyCell = {r: -1, c: -1};
+            puzzleState.currentTimeValue = 0;
+            console.warn(`(${config.id}) Playable cell coords not available for updateTargetEmptyCellForPuzzle.`);
             return;
         }
 
-        const now = new Date();
         let timeValue;
         switch (config.timeUnit) {
             case 'H': timeValue = now.getHours(); break;
             case 'M': timeValue = now.getMinutes(); break;
             case 'S': timeValue = now.getSeconds(); break;
-            default: console.error(`Unknown time unit: ${config.timeUnit}`); return;
+            default:
+                console.error(`(${config.id}) Unknown time unit: ${config.timeUnit}`);
+                puzzleState.targetEmptyCell = {r: -1, c: -1};
+                puzzleState.currentTimeValue = 0;
+                return;
         }
         puzzleState.currentTimeValue = timeValue;
 
         let currentPlayableCellIndex = timeValue;
 
         if (currentPlayableCellIndex < 0 || currentPlayableCellIndex >= puzzleState.playableCellCoords.length) {
-            console.error(`(${config.id}) Calculated playable cell index ${currentPlayableCellIndex} for time ${timeValue} is out of bounds! Defaulting to 0.`);
+            console.warn(`(${config.id}) Calculated playable cell index ${currentPlayableCellIndex} for time ${timeValue} is out of bounds (max: ${puzzleState.playableCellCoords.length -1}). Defaulting to 0.`);
             currentPlayableCellIndex = 0;
         }
-        puzzleState.targetEmptyCell = puzzleState.playableCellCoords[currentPlayableCellIndex];
+
+        if (currentPlayableCellIndex >= 0 && currentPlayableCellIndex < puzzleState.playableCellCoords.length) {
+            puzzleState.targetEmptyCell = puzzleState.playableCellCoords[currentPlayableCellIndex];
+        } else {
+            console.error(`(${config.id}) Fallback playable cell index ${currentPlayableCellIndex} is still invalid. Playable coords length: ${puzzleState.playableCellCoords.length}`);
+            puzzleState.targetEmptyCell = {r: -1, c: -1};
+        }
+    }
+
+    function solveAndStore(pState, timeValueToSolve) {
+        const config = pState.config;
+        if (timeValueToSolve < 0 || timeValueToSolve > config.maxTimeValue || !pState.playableCellCoords || timeValueToSolve >= pState.playableCellCoords.length) {
+            console.warn(`(${config.id}) Invalid timeValue ${timeValueToSolve} or missing playableCellCoords for solveAndStore.`);
+            return null;
+        }
+        if (precomputedSolutions[config.id] && precomputedSolutions[config.id][timeValueToSolve] !== undefined) {
+            return precomputedSolutions[config.id][timeValueToSolve];
+        }
+        const targetCellForSolve = pState.playableCellCoords[timeValueToSolve];
+        const solutionResult = findFullSolution(
+            targetCellForSolve,
+            pState.activePieceSet,
+            config.gridSize,
+            config.permanentlyBlockedCells
+        );
+        if (!precomputedSolutions[config.id]) {
+            precomputedSolutions[config.id] = {};
+        }
+        if (solutionResult.success) {
+            precomputedSolutions[config.id][timeValueToSolve] = solutionResult.placedPieces;
+            return solutionResult.placedPieces;
+        } else {
+            precomputedSolutions[config.id][timeValueToSolve] = null;
+            console.warn(`(${config.id}) No solution found for time value ${timeValueToSolve} (Target: ${targetCellForSolve.r},${targetCellForSolve.c}).`);
+            return null;
+        }
+    }
+
+    async function prioritizedPrecomputation() {
+        console.log("Starting prioritized pre-computation...");
+        const precomputeStartTime = performance.now();
+        const now = new Date();
+
+        console.log("Precomputing current time state...");
+        for (const pState of puzzleStates) {
+            let currentTimeValue;
+            switch (pState.config.timeUnit) {
+                case 'H': currentTimeValue = now.getHours(); break;
+                case 'M': currentTimeValue = now.getMinutes(); break;
+                case 'S': currentTimeValue = now.getSeconds(); break;
+            }
+            solveAndStore(pState, currentTimeValue);
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        console.log("Current time state precomputed.");
+        runUpdateCycle();
+
+        const NEAR_FUTURE_SECONDS = 5;
+        const NEAR_FUTURE_MINUTES = 1;
+        console.log("Precomputing near future states...");
+        const secondsPuzzle = puzzleStates.find(p => p.id === 'seconds');
+        if (secondsPuzzle) {
+            for (let i = 1; i <= NEAR_FUTURE_SECONDS; i++) {
+                const nextSecond = (now.getSeconds() + i) % 60;
+                solveAndStore(secondsPuzzle, nextSecond);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+        const minutesPuzzle = puzzleStates.find(p => p.id === 'minutes');
+        if (minutesPuzzle) {
+            for (let i = 1; i <= NEAR_FUTURE_MINUTES; i++) {
+                const nextMinute = (now.getMinutes() + i) % 60;
+                solveAndStore(minutesPuzzle, nextMinute);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+        console.log("Near future states precomputed.");
+        runUpdateCycle();
+
+        console.log("Starting full background pre-computation...");
+        for (const pState of puzzleStates) {
+            const config = pState.config;
+            console.log(`Full background pre-computation for ${config.id}...`);
+            for (let timeValue = 0; timeValue <= config.maxTimeValue; timeValue++) {
+                if (!(precomputedSolutions[config.id] && precomputedSolutions[config.id][timeValue] !== undefined)) {
+                    solveAndStore(pState, timeValue);
+                }
+                if (timeValue % 10 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+            console.log(`Full background pre-computation for ${config.id} finished.`);
+        }
+
+        precomputationFullyComplete = true;
+        const precomputeEndTime = performance.now();
+        console.log(`All pre-computation (prioritized) finished in ${(precomputeEndTime - precomputeStartTime).toFixed(2)} ms.`);
     }
 
     function runUpdateCycle() {
-        let anyPuzzleChanged = false;
+        const now = new Date();
+        let needsRedraw = false;
 
         puzzleStates.forEach(pState => {
-            const config = pState.config;
-            const previousTargetR = pState.targetEmptyCell.r;
-            const previousTargetC = pState.targetEmptyCell.c;
-            const hadPreviousSolution = pState.placedPieceInstances.length > 0;
+            const oldTimeValue = pState.currentTimeValue;
+            updateTargetEmptyCellForPuzzle(pState, now);
 
-            updateTargetEmptyCellForPuzzle(pState);
-
-            const targetCellChanged = (pState.targetEmptyCell.r !== previousTargetR || pState.targetEmptyCell.c !== previousTargetC);
-
-            if (!targetCellChanged && hadPreviousSolution) {
-                return;
+            if (pState.currentTimeValue !== oldTimeValue || (pState.placedPieceInstances.length === 0 && !(precomputedSolutions[pState.config.id] && precomputedSolutions[pState.config.id][pState.currentTimeValue]))) {
+                needsRedraw = true;
             }
-            anyPuzzleChanged = true;
 
-            if (!pState.activePieceSet || pState.activePieceSet.length === 0) {
-                console.error(`(${config.id}) No active piece set defined. Cannot solve.`);
-                pState.placedPieceInstances = [];
+            let solution = null;
+            if (precomputedSolutions[pState.config.id] && precomputedSolutions[pState.config.id][pState.currentTimeValue] !== undefined) {
+                solution = precomputedSolutions[pState.config.id][pState.currentTimeValue];
             } else {
-                console.log(`(${config.id}) Solving for ${config.timeUnit}: ${pState.currentTimeValue} (Target: ${pState.targetEmptyCell.r},${pState.targetEmptyCell.c})`);
-                let solutionResult;
-
-                if (targetCellChanged && hadPreviousSolution && previousTargetR !== -1) {
-                    solutionResult = findIncrementalSolution(
-                        pState.targetEmptyCell,
-                        { r: previousTargetR, c: previousTargetC },
-                        [...pState.placedPieceInstances],
-                        pState.activePieceSet,
-                        config.gridSize,
-                        config.permanentlyBlockedCells
-                    );
+                if (!precomputationFullyComplete) {
+                    console.warn(`(${pState.config.id}) Solution for ${pState.currentTimeValue} not yet precomputed. Solving on demand.`);
+                    solution = solveAndStore(pState, pState.currentTimeValue);
+                    needsRedraw = true;
                 } else {
-                    console.log(`(${config.id}) Performing initial or full re-solve.`);
-                    solutionResult = findFullSolution(
-                        pState.targetEmptyCell,
-                        pState.activePieceSet,
-                        config.gridSize,
-                        config.permanentlyBlockedCells
-                    );
+                     console.warn(`(${pState.config.id}) Precomputed solution for ${pState.currentTimeValue} missing after full precomputation.`);
                 }
+            }
 
-                if (solutionResult.success) {
-                    pState.placedPieceInstances = solutionResult.placedPieces;
-                    console.log(`(${config.id}) Solve type: ${solutionResult.type || 'unknown'}`);
-                } else {
-                    pState.placedPieceInstances = [];
-                    console.warn(`(${config.id}) No solution found for ${config.timeUnit} ${pState.currentTimeValue} (type: ${solutionResult.type || 'unknown'}). Board will be empty.`);
-                }
+            if (pState.placedPieceInstances !== solution && solution !== null) {
+                 pState.placedPieceInstances = solution || [];
+                 needsRedraw = true;
+            } else if (solution === null && pState.placedPieceInstances.length > 0) {
+                 pState.placedPieceInstances = [];
+                 needsRedraw = true;
             }
         });
 
-        redrawAllPuzzles(ctx, canvas, puzzleStates, CELL_SIZE, BORDER_THICKNESS, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
+        if (needsRedraw) {
+            redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
+        }
     }
 
     function initializeApp() {
         console.log("Initializing A-Puzzle-A-Time...");
-        setupCanvasDimensions();
+        calculateTotalPuzzleDimensions();
 
         PUZZLE_CONFIGS.forEach(config => {
             const currentPuzzleState = {
-                id: config.id,
-                config: config,
-                activePieceSet: [],
-                placedPieceInstances: [],
-                targetEmptyCell: { r: -1, c: -1 },
-                playableCellCoords: [],
-                currentTimeValue: 0,
+                id: config.id, config: config, activePieceSet: [], placedPieceInstances: [],
+                targetEmptyCell: { r: -1, c: -1 }, playableCellCoords: [],
+                currentTimeValue: -1, isValid: true
             };
-
             if (!initializePlayableCellAreaForPuzzle(currentPuzzleState)) {
-                return;
-            }
-
-            currentPuzzleState.activePieceSet = selectFixedPieceSet_deterministic(config.cellsToFill, MASTER_PIECES, config.pieceSelectionPreference);
-            if (!currentPuzzleState.activePieceSet || currentPuzzleState.activePieceSet.length === 0) {
-                console.error(`(${config.id}) Failed to initialize with a valid piece set. Puzzle will not run.`);
-                return;
-            }
-
-            updateTargetEmptyCellForPuzzle(currentPuzzleState);
-
-            console.log(`(${config.id}) Performing initial full solve for startup.`);
-            const initialResult = findFullSolution(
-                currentPuzzleState.targetEmptyCell,
-                currentPuzzleState.activePieceSet,
-                config.gridSize,
-                config.permanentlyBlockedCells
-            );
-
-            if (initialResult.success) {
-                currentPuzzleState.placedPieceInstances = initialResult.placedPieces;
+                currentPuzzleState.isValid = false;
             } else {
-                currentPuzzleState.placedPieceInstances = [];
-                console.warn(`(${config.id}) No solution found for initial time. Board will be empty.`);
+                currentPuzzleState.activePieceSet = selectFixedPieceSet_deterministic(
+                    config.cellsToFill, MASTER_PIECES, config.pieceSelectionPreference
+                );
+                if (!currentPuzzleState.activePieceSet || currentPuzzleState.activePieceSet.length === 0) {
+                    console.error(`(${config.id}) Failed to select piece set.`);
+                    currentPuzzleState.isValid = false;
+                }
+            }
+            if (currentPuzzleState.isValid) {
+                precomputedSolutions[config.id] = {};
             }
             puzzleStates.push(currentPuzzleState);
         });
 
+        puzzleStates = puzzleStates.filter(pState => pState.isValid);
+
+        if (puzzleStates.length === 0) {
+            console.error("No puzzles initialized successfully.");
+            ctx.font = "16px Arial"; ctx.fillStyle = "red"; ctx.textAlign = "center";
+            ctx.fillText("Error: Could not initialize any puzzles.", canvas.width / 2, canvas.height / 2);
+            return;
+        }
         if (puzzleStates.length !== PUZZLE_CONFIGS.length) {
-            console.error("Not all puzzles initialized successfully. Check logs.");
+            console.warn(`Some puzzles failed to initialize.`);
         }
 
-        redrawAllPuzzles(ctx, canvas, puzzleStates, CELL_SIZE, BORDER_THICKNESS, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
+        resizeAndRedrawCanvas();
+
+        window.addEventListener('resize', debounce(resizeAndRedrawCanvas, 250));
+
         setInterval(runUpdateCycle, 1000);
+
+        prioritizedPrecomputation().catch(err => {
+            console.error("Error during prioritized pre-computation:", err);
+        });
+    }
+
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
     }
 
     initializeApp();
