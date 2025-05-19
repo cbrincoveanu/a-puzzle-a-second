@@ -152,7 +152,7 @@ function drawLoadingScreen(ctx, canvasElement, progressPercentage) {
     ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
     ctx.fillStyle = '#333333';
-    ctx.font = 'bold 24px Arial, sans-serif';
+    ctx.font = 'bold 16px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
