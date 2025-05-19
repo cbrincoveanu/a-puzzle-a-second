@@ -1,5 +1,3 @@
-/* style.css */
-
 body {
     display: flex;
     flex-direction: column;
@@ -14,15 +12,15 @@ body {
 
 #top-container {
     width: 100%;
-    max-width: 800px; /* Or whatever max-width you prefer for the top content */
-    margin: 0 auto 20px auto; /* Center the top container and add bottom margin */
-    position: relative; /* Needed for absolute positioning of the GitHub link */
-    padding-top: 10px; /* Add some padding if icon is close to top */
+    max-width: 800px;
+    margin: 0 auto 20px auto;
+    position: relative;
+    padding-top: 10px;
 }
 
 h1 {
     color: #333;
-    margin-top: 0; /* Adjust if github icon is above */
+    margin-top: 0;
     margin-bottom: 10px;
     text-align: center;
 }
@@ -32,7 +30,7 @@ p {
     margin-bottom: 20px;
     color: #555;
     max-width: 600px;
-    margin-left: auto; /* Center paragraph if top-container is wider */
+    margin-left: auto;
     margin-right: auto;
 }
 
