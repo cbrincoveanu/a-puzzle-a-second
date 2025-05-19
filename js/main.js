@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const padding = 20;
         const topContainerHeight = document.getElementById('top-container')?.offsetHeight || 0;
         const availableWidth = window.innerWidth - padding;
-        const availableHeight = window.innerHeight - topContainerHeight - padding - 20; // Adjusted padding/margin below container
+        const availableHeight = window.innerHeight - topContainerHeight - padding - 40;
 
         if (totalPuzzleCellsWide === 0 || totalPuzzleCellsHigh === 0) {
             console.warn("Total puzzle dimensions not calculated yet. Skipping resize.");

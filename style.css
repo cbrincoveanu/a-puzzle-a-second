@@ -1,3 +1,5 @@
+/* style.css */
+
 body {
     display: flex;
     flex-direction: column;
@@ -10,9 +12,17 @@ body {
     min-height: 100vh;
 }
 
+#top-container {
+    width: 100%;
+    max-width: 800px; /* Or whatever max-width you prefer for the top content */
+    margin: 0 auto 20px auto; /* Center the top container and add bottom margin */
+    position: relative; /* Needed for absolute positioning of the GitHub link */
+    padding-top: 10px; /* Add some padding if icon is close to top */
+}
+
 h1 {
     color: #333;
-    margin-top: 10px;
+    margin-top: 0; /* Adjust if github icon is above */
     margin-bottom: 10px;
     text-align: center;
 }
@@ -22,6 +32,8 @@ p {
     margin-bottom: 20px;
     color: #555;
     max-width: 600px;
+    margin-left: auto; /* Center paragraph if top-container is wider */
+    margin-right: auto;
 }
 
 a {
@@ -30,14 +42,28 @@ a {
 }
 
 a:hover,
-a:active {
+a:active,
+a:visited {
     color: inherit;
     text-decoration: underline;
 }
 
-a:visited {
-    color: inherit;
-    text-decoration: underline;
+.github-link {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    text-decoration: none; 
+    display: inline-block;
+}
+
+.github-icon {
+    width: 32px;
+    height: 32px;
+    vertical-align: middle;
+}
+
+.github-link:hover .github-icon {
+    opacity: 0.7;
 }
 
 #canvas-container {
