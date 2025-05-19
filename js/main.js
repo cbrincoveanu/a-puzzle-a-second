@@ -1,5 +1,3 @@
-// js/main.js
-
 document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('puzzleCanvas');
     if (!canvas) { console.error("Canvas element not found!"); return; }
@@ -9,16 +7,74 @@ document.addEventListener('DOMContentLoaded', () => {
     let puzzleStates = [];
     let precomputedSolutions = {};
     const CANVAS_EFFECTIVE_BACKGROUND_COLOR = '#f0f0f0';
-    let precomputationFullyComplete = false;
 
     const ORIGINAL_CONFIG_CELL_SIZE = CELL_SIZE;
     const ORIGINAL_CONFIG_BORDER_THICKNESS = BORDER_THICKNESS;
 
     let currentDynamicCellSize = ORIGINAL_CONFIG_CELL_SIZE;
     let currentDynamicBorderThickness = ORIGINAL_CONFIG_BORDER_THICKNESS;
-
     let totalPuzzleCellsWide = 0;
     let totalPuzzleCellsHigh = 0;
+
+    let animatingPieces = {};
+    let animationFrameId = null;
+
+    let isLoadingPuzzles = true;
+    let precomputationProgress = 0;
+    let totalPuzzlesToPrecompute = 0;
+    let puzzlesPrecomputedCount = 0;
+
+    function sigmoidEasing(t) {
+        const k = 10;
+        return 1 / (1 + Math.exp(-k * (t - 0.5)));
+    }
+
+    function animate(timestamp) {
+        let animationInProgress = false;
+
+        puzzleStates.forEach(pState => {
+            const puzzleId = pState.id;
+            const piecesAnimatingForThisPuzzle = animatingPieces[puzzleId] || [];
+            const stillAnimating = [];
+
+            piecesAnimatingForThisPuzzle.forEach(animState => {
+                if (!animState.startTime) animState.startTime = timestamp;
+                const elapsed = timestamp - animState.startTime;
+                let progress = Math.min(elapsed / animState.duration, 1);
+
+                const easedProgress = sigmoidEasing(progress);
+                if (progress < 1) {
+                    animState.currentR = animState.startR + (animState.endR - animState.startR) * easedProgress;
+                    animState.currentC = animState.startC + (animState.endC - animState.startC) * easedProgress;
+                    let rotationDiff = animState.endRotation - animState.startRotation;
+                    if (rotationDiff > 180) rotationDiff -= 360;
+                    if (rotationDiff < -180) rotationDiff += 360;
+                    animState.currentRotation = animState.startRotation + rotationDiff * easedProgress;
+                    stillAnimating.push(animState);
+                    animationInProgress = true;
+                } else {
+                    animState.currentR = animState.endR;
+                    animState.currentC = animState.endC;
+                    animState.currentRotation = animState.endRotation;
+                }
+            });
+            animatingPieces[puzzleId] = stillAnimating;
+        });
+
+        redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoadingPuzzles, precomputationProgress);
+
+        if (animationInProgress) {
+            animationFrameId = requestAnimationFrame(animate);
+        } else {
+            animationFrameId = null;
+        }
+    }
+
+    function startAnimationLoop() {
+        if (!animationFrameId) {
+            animationFrameId = requestAnimationFrame(animate);
+        }
+    }
 
     function calculateTotalPuzzleDimensions() {
         totalPuzzleCellsWide = 0;
@@ -31,8 +87,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function resizeAndRedrawCanvas() {
         const padding = 20;
+        const topContainerHeight = document.getElementById('top-container')?.offsetHeight || 0;
         const availableWidth = window.innerWidth - padding;
-        const availableHeight = window.innerHeight - (document.querySelector('h1')?.offsetHeight || 60) - padding - 40;
+        const availableHeight = window.innerHeight - topContainerHeight - padding - 20; // Adjusted padding/margin below container
 
         if (totalPuzzleCellsWide === 0 || totalPuzzleCellsHigh === 0) {
             console.warn("Total puzzle dimensions not calculated yet. Skipping resize.");
@@ -55,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log(`Resized. New Cell Size: ${currentDynamicCellSize}, Canvas: ${canvas.width}x${canvas.height}`);
 
-        redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
+        redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoadingPuzzles, precomputationProgress);
     }
 
     function initializePlayableCellAreaForPuzzle(puzzleState) {
@@ -118,6 +175,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
         if (precomputedSolutions[config.id] && precomputedSolutions[config.id][timeValueToSolve] !== undefined) {
+            if (isLoadingPuzzles) {
+                 puzzlesPrecomputedCount++;
+                 precomputationProgress = (puzzlesPrecomputedCount / totalPuzzlesToPrecompute) * 100;
+                 if (!animationFrameId) {
+                     redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoadingPuzzles, precomputationProgress);
+                 }
+            }
             return precomputedSolutions[config.id][timeValueToSolve];
         }
         const targetCellForSolve = pState.playableCellCoords[timeValueToSolve];
@@ -130,114 +194,185 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!precomputedSolutions[config.id]) {
             precomputedSolutions[config.id] = {};
         }
+
         if (solutionResult.success) {
             precomputedSolutions[config.id][timeValueToSolve] = solutionResult.placedPieces;
-            return solutionResult.placedPieces;
         } else {
             precomputedSolutions[config.id][timeValueToSolve] = null;
             console.warn(`(${config.id}) No solution found for time value ${timeValueToSolve} (Target: ${targetCellForSolve.r},${targetCellForSolve.c}).`);
-            return null;
         }
+
+        if (isLoadingPuzzles) {
+            puzzlesPrecomputedCount++;
+            precomputationProgress = (puzzlesPrecomputedCount / totalPuzzlesToPrecompute) * 100;
+            if (!animationFrameId) {
+                redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoadingPuzzles, precomputationProgress);
+            }
+        }
+        return solutionResult.success ? solutionResult.placedPieces : null;
     }
 
-    async function prioritizedPrecomputation() {
-        console.log("Starting prioritized pre-computation...");
-        const precomputeStartTime = performance.now();
-        const now = new Date();
+    function calculateTransitionAnimationStates(oldSolutionPieces, newSolutionPieces, puzzleId, duration) {
+        const animationStates = [];
+        const oldPiecesMap = new Map((oldSolutionPieces || []).map(p => [p.piece.id, p]));
 
-        console.log("Precomputing current time state...");
-        for (const pState of puzzleStates) {
-            let currentTimeValue;
-            switch (pState.config.timeUnit) {
-                case 'H': currentTimeValue = now.getHours(); break;
-                case 'M': currentTimeValue = now.getMinutes(); break;
-                case 'S': currentTimeValue = now.getSeconds(); break;
-            }
-            solveAndStore(pState, currentTimeValue);
-            await new Promise(resolve => setTimeout(resolve, 0));
-        }
-        console.log("Current time state precomputed.");
-        runUpdateCycle();
+        (newSolutionPieces || []).forEach(newP => {
+            const oldP = oldPiecesMap.get(newP.piece.id);
+            const isNewOrMoved = !oldP ||
+                                 oldP.r !== newP.r ||
+                                 oldP.c !== newP.c ||
+                                 (oldP.rotation || 0) !== (newP.rotation || 0) ||
+                                 JSON.stringify(oldP.currentShape) !== JSON.stringify(newP.currentShape);
 
-        const NEAR_FUTURE_SECONDS = 5;
-        const NEAR_FUTURE_MINUTES = 1;
-        console.log("Precomputing near future states...");
-        const secondsPuzzle = puzzleStates.find(p => p.id === 'seconds');
-        if (secondsPuzzle) {
-            for (let i = 1; i <= NEAR_FUTURE_SECONDS; i++) {
-                const nextSecond = (now.getSeconds() + i) % 60;
-                solveAndStore(secondsPuzzle, nextSecond);
-                await new Promise(resolve => setTimeout(resolve, 0));
-            }
-        }
-        const minutesPuzzle = puzzleStates.find(p => p.id === 'minutes');
-        if (minutesPuzzle) {
-            for (let i = 1; i <= NEAR_FUTURE_MINUTES; i++) {
-                const nextMinute = (now.getMinutes() + i) % 60;
-                solveAndStore(minutesPuzzle, nextMinute);
-                await new Promise(resolve => setTimeout(resolve, 0));
-            }
-        }
-        console.log("Near future states precomputed.");
-        runUpdateCycle();
-
-        console.log("Starting full background pre-computation...");
-        for (const pState of puzzleStates) {
-            const config = pState.config;
-            console.log(`Full background pre-computation for ${config.id}...`);
-            for (let timeValue = 0; timeValue <= config.maxTimeValue; timeValue++) {
-                if (!(precomputedSolutions[config.id] && precomputedSolutions[config.id][timeValue] !== undefined)) {
-                    solveAndStore(pState, timeValue);
-                }
-                if (timeValue % 10 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 0));
-                }
-            }
-            console.log(`Full background pre-computation for ${config.id} finished.`);
-        }
-
-        precomputationFullyComplete = true;
-        const precomputeEndTime = performance.now();
-        console.log(`All pre-computation (prioritized) finished in ${(precomputeEndTime - precomputeStartTime).toFixed(2)} ms.`);
-    }
-
-    function runUpdateCycle() {
-        const now = new Date();
-        let needsRedraw = false;
-
-        puzzleStates.forEach(pState => {
-            const oldTimeValue = pState.currentTimeValue;
-            updateTargetEmptyCellForPuzzle(pState, now);
-
-            if (pState.currentTimeValue !== oldTimeValue || (pState.placedPieceInstances.length === 0 && !(precomputedSolutions[pState.config.id] && precomputedSolutions[pState.config.id][pState.currentTimeValue]))) {
-                needsRedraw = true;
-            }
-
-            let solution = null;
-            if (precomputedSolutions[pState.config.id] && precomputedSolutions[pState.config.id][pState.currentTimeValue] !== undefined) {
-                solution = precomputedSolutions[pState.config.id][pState.currentTimeValue];
-            } else {
-                if (!precomputationFullyComplete) {
-                    console.warn(`(${pState.config.id}) Solution for ${pState.currentTimeValue} not yet precomputed. Solving on demand.`);
-                    solution = solveAndStore(pState, pState.currentTimeValue);
-                    needsRedraw = true;
-                } else {
-                     console.warn(`(${pState.config.id}) Precomputed solution for ${pState.currentTimeValue} missing after full precomputation.`);
-                }
-            }
-
-            if (pState.placedPieceInstances !== solution && solution !== null) {
-                 pState.placedPieceInstances = solution || [];
-                 needsRedraw = true;
-            } else if (solution === null && pState.placedPieceInstances.length > 0) {
-                 pState.placedPieceInstances = [];
-                 needsRedraw = true;
+            if (isNewOrMoved) {
+                animationStates.push({
+                    pieceInstance: newP,
+                    startR: oldP ? oldP.r : newP.r,
+                    startC: oldP ? oldP.c : newP.c,
+                    startRotation: oldP ? (oldP.rotation || 0) : (newP.rotation || 0),
+                    endR: newP.r,
+                    endC: newP.c,
+                    endRotation: newP.rotation || 0,
+                    currentR: oldP ? oldP.r : newP.r,
+                    currentC: oldP ? oldP.c : newP.c,
+                    currentRotation: oldP ? (oldP.rotation || 0) : (newP.rotation || 0),
+                    startTime: 0,
+                    duration: duration,
+                    isInitialAppear: false,
+                    isDisappearing: false
+                });
             }
         });
 
-        if (needsRedraw) {
-            redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR);
+        (oldSolutionPieces || []).forEach(oldP => {
+            if (!(newSolutionPieces || []).some(newP => newP.piece.id === oldP.piece.id)) {
+                animationStates.push({
+                    pieceInstance: oldP,
+                    startR: oldP.r, startC: oldP.c, startRotation: oldP.rotation || 0,
+                    endR: oldP.r, endC: oldP.c, endRotation: oldP.rotation || 0,
+                    currentR: oldP.r, currentC: oldP.c, currentRotation: oldP.rotation || 0,
+                    startTime: 0, duration: duration, isInitialAppear: false, isDisappearing: true
+                });
+            }
+        });
+        return animationStates;
+    }
+
+    async function startFullPrecomputation() {
+        isLoadingPuzzles = true;
+        puzzlesPrecomputedCount = 0;
+        totalPuzzlesToPrecompute = 0;
+        puzzleStates.forEach(pState => {
+            totalPuzzlesToPrecompute += (pState.config.maxTimeValue + 1);
+        });
+        precomputationProgress = 0;
+        redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoading = true, loadingProgress = 0);
+
+        console.log("Starting full pre-computation of all states...");
+        const precomputeStartTime = performance.now();
+
+        for (const pState of puzzleStates) {
+            const config = pState.config;
+            for (let timeValue = 0; timeValue <= config.maxTimeValue; timeValue++) {
+                solveAndStore(pState, timeValue);
+                if (timeValue % 5 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
         }
+
+        precomputationFullyComplete = true;
+        isLoadingPuzzles = false;
+        const precomputeEndTime = performance.now();
+        console.log(`All pre-computation finished in ${(precomputeEndTime - precomputeStartTime).toFixed(2)} ms.`);
+
+        runUpdateCycle();
+    }
+
+    function runUpdateCycle() {
+        if (isLoadingPuzzles || animationFrameId) {
+            if (!isLoadingPuzzles) {
+                const nowForTargetCell = new Date();
+                puzzleStates.forEach(pState => updateTargetEmptyCellForPuzzle(pState, nowForTargetCell));
+            }
+            return;
+        }
+
+        const now = new Date();
+        let animationTriggeredThisCycle = false;
+        let needsStaticRedraw = false;
+
+        puzzleStates.forEach(pState => {
+            const config = pState.config;
+            const oldTimeValue = pState.currentTimeValue;
+            const oldPlacedPieces = pState.placedPieceInstances ? [...pState.placedPieceInstances] : [];
+
+            updateTargetEmptyCellForPuzzle(pState, now);
+
+            if (pState.currentTimeValue === oldTimeValue && oldPlacedPieces.length > 0) {
+                 if (!animatingPieces[pState.id] || animatingPieces[pState.id].length === 0) {
+                     needsStaticRedraw = true;
+                 }
+                 return;
+            }
+
+            let newSolution = null;
+            if (precomputedSolutions[config.id] && precomputedSolutions[config.id][pState.currentTimeValue] !== undefined) {
+                newSolution = precomputedSolutions[config.id][pState.currentTimeValue];
+            } else {
+                console.warn(`(${config.id}) Solution for ${pState.currentTimeValue} not found in precomputed. Attempting on-demand (should not happen if precomp complete).`);
+                newSolution = solveAndStore(pState, pState.currentTimeValue);
+            }
+            const newSolutionWithRotation = newSolution ? newSolution.map(p => ({...p, rotation: 0})) : null;
+
+            const currentVisualState = (animatingPieces[pState.id] && animatingPieces[pState.id].length > 0)
+                ? animatingPieces[pState.id].map(anim => anim.pieceInstance)
+                : oldPlacedPieces;
+
+            if (newSolutionWithRotation && !areSolutionsEqual(currentVisualState, newSolutionWithRotation)) {
+                animatingPieces[config.id] = calculateTransitionAnimationStates(
+                    currentVisualState, newSolutionWithRotation, config.id, TRANSITION_ANIMATION_DURATION
+                );
+                pState.placedPieceInstances = newSolutionWithRotation;
+                animationTriggeredThisCycle = true;
+            } else if (!newSolutionWithRotation && currentVisualState.length > 0) {
+                 animatingPieces[config.id] = calculateTransitionAnimationStates(
+                     currentVisualState, null, config.id, TRANSITION_ANIMATION_DURATION
+                 );
+                 pState.placedPieceInstances = [];
+                 animationTriggeredThisCycle = true;
+            } else if (newSolutionWithRotation && currentVisualState.length === 0 && (!animatingPieces[pState.id] || animatingPieces[pState.id].length === 0)) {
+                 pState.placedPieceInstances = newSolutionWithRotation;
+                 needsStaticRedraw = true;
+            } else if (!newSolutionWithRotation && currentVisualState.length === 0) {
+            } else {
+                 needsStaticRedraw = true;
+            }
+        });
+
+        if (animationTriggeredThisCycle) {
+            startAnimationLoop();
+        } else if (needsStaticRedraw && !animationFrameId) {
+            redrawAllPuzzles(ctx, canvas, puzzleStates, currentDynamicCellSize, currentDynamicBorderThickness, CANVAS_EFFECTIVE_BACKGROUND_COLOR, animatingPieces, isLoadingPuzzles, precomputationProgress);
+        }
+    }
+
+    function areSolutionsEqual(solution1, solution2) {
+        if (!solution1 && !solution2) return true;
+        if (!solution1 || !solution2) return false;
+        if (solution1.length !== solution2.length) return false;
+
+        const map1 = new Map(solution1.map(p => [p.piece.id, { r: p.r, c: p.c, shape: p.currentShape, rot: p.rotation || 0 }]));
+        for (const p2 of solution2) {
+            const p1Details = map1.get(p2.piece.id);
+            if (!p1Details) return false;
+            if (p1Details.r !== p2.r || p1Details.c !== p2.c ||
+                JSON.stringify(p1Details.shape) !== JSON.stringify(p2.currentShape) ||
+                p1Details.rot !== (p2.rotation || 0)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     function initializeApp() {
@@ -263,6 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (currentPuzzleState.isValid) {
                 precomputedSolutions[config.id] = {};
+                animatingPieces[config.id] = [];
             }
             puzzleStates.push(currentPuzzleState);
         });
@@ -280,13 +416,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         resizeAndRedrawCanvas();
-
         window.addEventListener('resize', debounce(resizeAndRedrawCanvas, 250));
 
         setInterval(runUpdateCycle, 1000);
 
-        prioritizedPrecomputation().catch(err => {
-            console.error("Error during prioritized pre-computation:", err);
+        startFullPrecomputation().catch(err => {
+            console.error("Error during full pre-computation:", err);
+            isLoadingPuzzles = false;
+            runUpdateCycle();
         });
     }
 
